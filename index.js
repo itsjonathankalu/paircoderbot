@@ -19,9 +19,9 @@ const webhookPath = "/new-message";
 
 // Initialize Gemini client
 const genAI = new GoogleGenerativeAI(geminiKey);
-// const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+// const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
 app.post(webhookPath, async (req, res) => {
   const { message } = req.body;
@@ -54,7 +54,7 @@ app.post(webhookPath, async (req, res) => {
     try {
       await axios.post(`${telegramApi}/sendMessage`, {
         chat_id: chatId,
-        text: "This model has reached its maximum usage for today. Please try again tomorrow.",
+        text: "The server is busy or overloaded. Please try again in a minute.",
       });
     } catch (sendErr) {
       console.error("Error sending fallback message:", sendErr);
