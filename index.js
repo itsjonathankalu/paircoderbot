@@ -19,9 +19,9 @@ const webhookPath = "/new-message";
 
 // Initialize Gemini client
 const genAI = new GoogleGenerativeAI(geminiKey);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+// const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
-// const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
 app.post(webhookPath, async (req, res) => {
   const { message } = req.body;
