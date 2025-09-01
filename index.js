@@ -54,7 +54,7 @@ app.post(webhookPath, async (req, res) => {
     try {
       await axios.post(`${telegramApi}/sendMessage`, {
         chat_id: chatId,
-        text: "Error, something went wrong try again later",
+        text: "This model has reached its maximum usage for today. Please try again tomorrow.",
       });
     } catch (sendErr) {
       console.error("Error sending fallback message:", sendErr);
