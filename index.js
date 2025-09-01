@@ -4,6 +4,10 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const { OpenAI } = require('openai');
 
+console.log('Starting server...');
+console.log('TELEGRAM_BOT_TOKEN exists:', !!process.env.TELEGRAM_BOT_TOKEN);
+console.log('OPENROUTER_API_KEY exists:', !!process.env.OPENROUTER_API_KEY);
+
 const app = express();
 app.use(bodyParser.json());
 
