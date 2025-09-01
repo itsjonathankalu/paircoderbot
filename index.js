@@ -11,9 +11,9 @@ console.log('OPENROUTER_API_KEY exists:', !!process.env.OPENROUTER_API_KEY);
 const app = express();
 app.use(bodyParser.json());
 
+// --- Bot Configuration ---
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const openRouterKey = process.env.OPENROUTER_API_KEY;
-
 const telegramApi = `https://api.telegram.org/bot${telegramToken}`;
 const webhookPath = '/new-message';
 
@@ -22,29 +22,63 @@ const openai = new OpenAI({
     baseURL: 'https://openrouter.ai/api/v1',
 });
 
+const availableModels = {
+    'deepseek': 'deepseek/deepseek-r1:free',
+    'qwen': 'qwen/qwen3-235b-a22b',
+    'llama': 'meta-llama/llama-4-maverick',
+    'gemini': 'google/gemini-2.5-pro',
+    'mistral': 'mistralai/mistral-small-3.1-24b-instruct',
+};
+const defaultModel = 'deepseek/deepseek-r1:free';
+
+let userModelChoices = {}; // In-memory store for user model preferences
+
+// --- Bot Logic ---
 app.post(webhookPath, async (req, res) => {
     const { message } = req.body;
 
-    if (!message) {
+    if (!message || !message.text) {
         return res.sendStatus(200);
     }
 
     const chatId = message.chat.id;
     const text = message.text;
 
-    if (!text) {
-        return res.sendStatus(200);
+    // --- Command Handling ---
+    if (text.startsWith('/')) {
+        const [command, arg] = text.substring(1).split(' ');
+
+        if (command === 'models') {
+            const modelList = Object.keys(availableModels).map(key => `- ${key}`).join('\n');
+            const reply = `Available models:\n${modelList}\n\nType /setmodel <model_name> to choose one.`;
+            await axios.post(`${telegramApi}/sendMessage`, { chat_id: chatId, text: reply });
+            return res.sendStatus(200);
+        }
+
+        if (command === 'setmodel') {
+            if (arg && availableModels[arg]) {
+                userModelChoices[chatId] = availableModels[arg];
+                const reply = `Model set to: ${arg}`;
+                await axios.post(`${telegramApi}/sendMessage`, { chat_id: chatId, text: reply });
+            } else {
+                const reply = `Invalid model. Use /models to see the list of available models.`;
+                await axios.post(`${telegramApi}/sendMessage`, { chat_id: chatId, text: reply });
+            }
+            return res.sendStatus(200);
+        }
     }
 
+    // --- Regular Message Handling ---
     try {
-        // Send a 'typing...' action to let the user know the bot is working
         await axios.post(`${telegramApi}/sendChatAction`, {
             chat_id: chatId,
             action: 'typing',
         });
 
+        const userModel = userModelChoices[chatId] || defaultModel;
+
         const response = await openai.chat.completions.create({
-            model: 'deepseek/deepseek-r1:free',
+            model: userModel,
             messages: [{ role: 'user', content: text }],
         });
 
@@ -58,18 +92,14 @@ app.post(webhookPath, async (req, res) => {
         res.sendStatus(200);
     } catch (error) {
         console.error('Error:', error);
-        // Optionally send an error message to the chat
-        try {
-            await axios.post(`${telegramApi}/sendMessage`, {
-                chat_id: chatId,
-                text: 'Sorry, something went wrong.',
-            });
-        } catch (sendError) {
-            console.error('Error sending error message:', sendError);
-        }
+        await axios.post(`${telegramApi}/sendMessage`, {
+            chat_id: chatId,
+            text: 'Sorry, something went wrong.',
+        }).catch(err => console.error('Error sending error message:', err));
         res.sendStatus(500);
     }
 });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
