@@ -43,12 +43,22 @@ app.post(webhookPath, async (req, res) => {
             action: 'typing',
         });
 
-        const response = await openai.chat.completions.create({
-            model: 'deepseek/deepseek-r1:free',
-            messages: [{ role: 'user', content: text }],
-        });
-
-        const reply = response.choices[0].message.content;
+        let reply;
+        try {
+            const response = await openai.chat.completions.create({
+                model: 'deepseek/deepseek-r1:free',
+                messages: [{ role: 'user', content: text }],
+            });
+            reply = response.choices[0].message.content;
+        } catch (error) {
+            console.error('DeepSeek failed:', error.response?.data || error.message);
+            // Fallback to another free model
+            const fallback = await openai.chat.completions.create({
+                model: 'qwen/qwen2-72b-instruct:free',
+                messages: [{ role: 'user', content: text }],
+            });
+            reply = fallback.choices[0].message.content;
+        }
 
         await axios.post(`${telegramApi}/sendMessage`, {
             chat_id: chatId,
