@@ -2,64 +2,45 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const { OpenAI } = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 console.log('Starting server...');
 console.log('TELEGRAM_BOT_TOKEN exists:', !!process.env.TELEGRAM_BOT_TOKEN);
-console.log('OPENROUTER_API_KEY exists:', !!process.env.OPENROUTER_API_KEY);
+console.log('GEMINI_API_KEY exists:', !!process.env.GEMINI_API_KEY);
 
 const app = express();
 app.use(bodyParser.json());
 
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const openRouterKey = process.env.OPENROUTER_API_KEY;
+const geminiKey = process.env.GEMINI_API_KEY;
 
 const telegramApi = `https://api.telegram.org/bot${telegramToken}`;
 const webhookPath = '/new-message';
 
-const openai = new OpenAI({
-    apiKey: openRouterKey,
-    baseURL: 'https://openrouter.ai/api/v1',
-});
+// Initialize Gemini client
+const genAI = new GoogleGenerativeAI(geminiKey);
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 app.post(webhookPath, async (req, res) => {
     const { message } = req.body;
-
-    if (!message) {
-        return res.sendStatus(200);
-    }
+    if (!message || !message.text) return res.sendStatus(200);
 
     const chatId = message.chat.id;
     const text = message.text;
 
-    if (!text) {
-        return res.sendStatus(200);
-    }
-
     try {
-        // Send a 'typing...' action to let the user know the bot is working
+        // Send "typing…" to Telegram
         await axios.post(`${telegramApi}/sendChatAction`, {
             chat_id: chatId,
             action: 'typing',
         });
 
-        let reply;
-        try {
-            const response = await openai.chat.completions.create({
-                model: 'deepseek/deepseek-r1:free',
-                messages: [{ role: 'user', content: text }],
-            });
-            reply = response.choices[0].message.content;
-        } catch (error) {
-            console.error('DeepSeek failed:', error.response?.data || error.message);
-            // Fallback to another free model
-            const fallback = await openai.chat.completions.create({
-                model: 'qwen/qwen2-72b-instruct:free',
-                messages: [{ role: 'user', content: text }],
-            });
-            reply = fallback.choices[0].message.content;
-        }
+        // Get AI response from Gemini
+        const result = await model.generateContent(text);
+        const response = await result.response;
+        const reply = response.text();
 
+        // Send reply back to Telegram
         await axios.post(`${telegramApi}/sendMessage`, {
             chat_id: chatId,
             text: reply,
@@ -67,15 +48,14 @@ app.post(webhookPath, async (req, res) => {
 
         res.sendStatus(200);
     } catch (error) {
-        console.error('Error:', error);
-        // Optionally send an error message to the chat
+        console.error('Gemini Error:', error);
         try {
             await axios.post(`${telegramApi}/sendMessage`, {
                 chat_id: chatId,
-                text: 'Sorry, something went wrong.',
+                text: 'Sorry, something went wrong with Gemini.',
             });
-        } catch (sendError) {
-            console.error('Error sending error message:', sendError);
+        } catch (sendErr) {
+            console.error('Error sending fallback message:', sendErr);
         }
         res.sendStatus(500);
     }
@@ -83,11 +63,7 @@ app.post(webhookPath, async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log('Setting up webhook...');
-    // NOTE: You need to run this command once locally after deploying your bot
-    // to set the webhook. Replace YOUR_DEPLOYED_URL with your actual URL.
-    // curl -F "url=https://YOUR_DEPLOYED_URL/new-message" https://api.telegram.org/bot<YOUR_TELEGRAM_BOT_TOKEN>/setWebhook
-    console.log(`Webhook setup command:`);
+    console.log(`Server running on port ${PORT}`);
+    console.log('Webhook setup command:');
     console.log(`curl -F "url=<YOUR_DEPLOYED_URL>${webhookPath}" ${telegramApi}/setWebhook`);
 });
