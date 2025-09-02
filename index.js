@@ -2,24 +2,24 @@ require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { Groq } = require("groq-sdk");
 
 console.log("Starting server...");
 console.log("TELEGRAM_BOT_TOKEN exists:", !!process.env.TELEGRAM_BOT_TOKEN);
-console.log("GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+console.log("GROQ_API_KEY exists:", !!process.env.GROQ_API_KEY);
 
 const app = express();
 app.use(bodyParser.json());
 
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const geminiKey = process.env.GEMINI_API_KEY;
+const groqApiKey = process.env.GROQ_API_KEY;
 
 const telegramApi = `https://api.telegram.org/bot${telegramToken}`;
 const webhookPath = "/new-message";
 
-// Initialize Gemini client
-const genAI = new GoogleGenerativeAI(geminiKey);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+// Initialize Groq client
+const groq = new Groq({ apiKey: groqApiKey });
+
 app.post(webhookPath, async (req, res) => {
   const { message } = req.body;
   if (!message || !message.text) return res.sendStatus(200);
@@ -34,10 +34,22 @@ app.post(webhookPath, async (req, res) => {
       action: "typing",
     });
 
-    // Get AI response from Gemini
-    const result = await model.generateContent(text);
-    const response = await result.response;
-    const reply = response.text();
+    // Get AI response from Groq
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "user",
+          content: text,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 1,
+      max_tokens: 8192,
+      top_p: 1,
+      stream: false,
+      stop: null
+    });
+    const reply = chatCompletion.choices[0].message.content;
 
     // Send reply back to Telegram
     await axios.post(`${telegramApi}/sendMessage`, {
@@ -47,7 +59,7 @@ app.post(webhookPath, async (req, res) => {
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("Groq Error:", error);
     try {
       await axios.post(`${telegramApi}/sendMessage`, {
         chat_id: chatId,
