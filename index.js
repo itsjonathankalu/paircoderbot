@@ -3,6 +3,8 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
 const { Groq } = require("groq-sdk");
+const fs = require("fs");
+const { startPrompter } = require("./prompter");
 
 console.log("Starting server...");
 console.log("TELEGRAM_BOT_TOKEN exists:", !!process.env.TELEGRAM_BOT_TOKEN);
@@ -26,19 +28,46 @@ app.post(webhookPath, async (req, res) => {
 
   const chatId = message.chat.id;
   const text = message.text;
-  const firstName = message.from?.first_name || "there";
-  const chatType = message.chat.type;
+  const firstName = message.from?.first_name || "there"; // fetch Telegram first name
 
-  const isMentioned =
-    message.entities?.some(
-      e =>
-        e.type === "mention" &&
-        text.slice(e.offset, e.offset + e.length) === "@paircoderbot"
-    );
+  // Dynamic user registration
+  const usersFilePath = "./users.json";
+  let users = {};
+  try {
+    const usersData = fs.readFileSync(usersFilePath, "utf-8");
+    users = JSON.parse(usersData);
+  } catch (error) {
+    // If file doesn't exist, it will be created
+  }
 
-  const shouldRespond = chatType === 'private' || isMentioned;
+  const userExists = Object.values(users).some(batch => batch.some(user => user.chatId === chatId));
 
-  if (!shouldRespond) return res.sendStatus(200);
+  if (!userExists) {
+    const newUser = { chatId, name: firstName };
+    const batchKeys = Object.keys(users);
+    let targetBatch = "batch1";
+
+    if (batchKeys.length > 0) {
+        const lastBatch = batchKeys[batchKeys.length - 1];
+        if (users[lastBatch].length >= 2) {
+            targetBatch = `batch${batchKeys.length + 1}`;
+        } else {
+            targetBatch = lastBatch;
+        }
+    } 
+
+    if (!users[targetBatch]) {
+      users[targetBatch] = [];
+    }
+    users[targetBatch].push(newUser);
+
+    try {
+      fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
+      console.log(`Added new user ${firstName} to ${targetBatch}`);
+    } catch (error) {
+      console.error("Error writing to users.json:", error);
+    }
+  }
 
   try {
     // Send "typing…" to Telegram
@@ -52,7 +81,7 @@ app.post(webhookPath, async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `You are Cody, a friendly AI assistant. The user\'s name is ${firstName}. Greet them naturally using their name and reference previous messages if relevant. Keep the tone helpful and engaging.`
+          content: `You are Cody, a friendly AI assistant. The user's name is ${firstName}. Greet them naturally using their name and reference previous messages if relevant. Keep the tone helpful and engaging.`
         },
         {
           role: "user",
@@ -72,7 +101,6 @@ app.post(webhookPath, async (req, res) => {
     await axios.post(`${telegramApi}/sendMessage`, {
       chat_id: chatId,
       text: reply,
-      reply_to_message_id: chatType !== 'private' ? message.message_id : undefined,
     });
 
     res.sendStatus(200);
@@ -97,4 +125,5 @@ app.listen(PORT, () => {
   console.log(
     `curl -F "url=<YOUR_DEPLOYED_URL>${webhookPath}" ${telegramApi}/setWebhook`
   );
+  startPrompter();
 });
