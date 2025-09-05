@@ -26,7 +26,19 @@ app.post(webhookPath, async (req, res) => {
 
   const chatId = message.chat.id;
   const text = message.text;
-  const firstName = message.from?.first_name || "there"; // fetch Telegram first name
+  const firstName = message.from?.first_name || "there";
+  const chatType = message.chat.type;
+
+  const isMentioned =
+    message.entities?.some(
+      e =>
+        e.type === "mention" &&
+        text.slice(e.offset, e.offset + e.length) === "@paircoderbot"
+    );
+
+  const shouldRespond = chatType === 'private' || isMentioned;
+
+  if (!shouldRespond) return res.sendStatus(200);
 
   try {
     // Send "typing…" to Telegram
@@ -40,7 +52,7 @@ app.post(webhookPath, async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `You are Cody, a friendly AI assistant. The user's name is ${firstName}. Greet them naturally using their name and reference previous messages if relevant. Keep the tone helpful and engaging.`
+          content: `You are Cody, a friendly AI assistant. The user\'s name is ${firstName}. Greet them naturally using their name and reference previous messages if relevant. Keep the tone helpful and engaging.`
         },
         {
           role: "user",
@@ -60,6 +72,7 @@ app.post(webhookPath, async (req, res) => {
     await axios.post(`${telegramApi}/sendMessage`, {
       chat_id: chatId,
       text: reply,
+      reply_to_message_id: chatType !== 'private' ? message.message_id : undefined,
     });
 
     res.sendStatus(200);
