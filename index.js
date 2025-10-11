@@ -22,6 +22,11 @@ const webhookPath = "/new-message";
 // Initialize Groq client
 const groq = new Groq({ apiKey: groqApiKey });
 
+// Health check endpoint for Docker
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
 app.post(webhookPath, async (req, res) => {
   const { message } = req.body;
   if (!message || !message.text) return res.sendStatus(200);
