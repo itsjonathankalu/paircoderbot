@@ -119,35 +119,51 @@ function truncateChat(chat, maxMessages = 20) {
  */
 async function extractFacts(currentFacts, userMessage, firstName) {
   try {
-    const factExtractionPrompt = `You are a fact extraction assistant. Extract ONLY new factual information about the user from their message.
+    const factExtractionPrompt = `You are an expert fact extraction system. Extract ALL factual information about the user from their message.
 
-Current known facts about the user:
+Current known facts:
 ${JSON.stringify(currentFacts, null, 2)}
 
-User's new message: "${userMessage}"
+User's message: "${userMessage}"
 
-Instructions:
-1. Extract ONLY clear, factual information (age, name, location, occupation, hobbies, preferences, etc.)
-2. Do NOT extract opinions, questions, or temporary states
-3. Update existing facts if new information contradicts them
-4. Return ONLY a JSON object with key-value pairs
-5. If no new facts, return an empty object {}
-6. Use simple keys like: age, name, city, country, occupation, hobby, favorite_color, etc.
+CRITICAL RULES:
+1. Extract EVERY piece of factual information - handle complex sentences with multiple facts
+2. Use descriptive keys: age, full_name, first_name, last_name, occupation, years_experience, city, country, hobby, favorite_color, school, field_of_study, role, etc.
+3. For experience: use "years_experience" with a number
+4. For full names: extract full_name, first_name, and last_name separately
+5. Update existing facts if new info contradicts them
+6. Do NOT extract: questions, opinions, greetings, temporary states
+7. Return ONLY valid JSON
 
-Examples:
-- "I am 17" → {"age": 17}
-- "I live in Enugu" → {"city": "Enugu"}
-- "My name is Jonathan" → {"name": "Jonathan"}
-- "I love coding" → {"hobby": "coding"}
-- "How are you?" → {}
+EXAMPLES:
 
-Return ONLY valid JSON, nothing else:`;
+"I am 17" → {"age": 17}
+
+"My name is Jonathan Kalu" → {"full_name": "Jonathan Kalu", "first_name": "Jonathan", "last_name": "Kalu"}
+
+"I'm a software developer with 3 years of experience" → {"occupation": "software developer", "years_experience": 3}
+
+"I want to tell you about myself - I'm Jonathan Kalu, a software developer, I created you, I'm 17 with 3 years of experience" → {
+  "full_name": "Jonathan Kalu",
+  "first_name": "Jonathan",
+  "last_name": "Kalu",
+  "occupation": "software developer",
+  "age": 17,
+  "years_experience": 3,
+  "role": "creator"
+}
+
+"I love coding and my favorite color is blue" → {"hobby": "coding", "favorite_color": "blue"}
+
+"How are you?" → {}
+
+Extract ALL facts. Return ONLY JSON:`;
 
     const factExtraction = await groq.chat.completions.create({
       messages: [
         { 
           role: "system", 
-          content: "You extract structured factual information about users from their messages. Return only valid JSON." 
+          content: "You are an expert at extracting ALL factual information from text. Extract every fact from complex sentences. Return only valid JSON, no explanations." 
         },
         { 
           role: "user", 
@@ -155,35 +171,34 @@ Return ONLY valid JSON, nothing else:`;
         }
       ],
       model: "llama-3.1-8b-instant",
-      temperature: 0.1, // Low temperature for consistent extraction
-      max_tokens: 500
+      temperature: 0, // Zero for maximum consistency
+      max_tokens: 1000
     });
 
     const responseText = factExtraction.choices[0].message.content.trim();
     
-    // Try to parse JSON, handling potential markdown code blocks
+    // Parse JSON, handling markdown code blocks
     let extractedFacts = {};
     try {
-      // Remove markdown code blocks if present
       const cleanedResponse = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       extractedFacts = JSON.parse(cleanedResponse);
     } catch (parseError) {
-      console.log("Could not parse facts, using empty object:", responseText);
+      console.log("⚠️ Could not parse facts:", responseText);
       extractedFacts = {};
     }
 
     // Merge with current facts
     const updatedFacts = { ...currentFacts, ...extractedFacts };
     
-    // Log if new facts were extracted
+    // Log extracted facts
     if (Object.keys(extractedFacts).length > 0) {
-      console.log(`📝 Extracted new facts for user:`, extractedFacts);
+      console.log(`📝 Extracted facts:`, extractedFacts);
     }
 
     return updatedFacts;
   } catch (error) {
     console.error("Error extracting facts:", error);
-    return currentFacts; // Return unchanged facts on error
+    return currentFacts;
   }
 }
 
@@ -221,39 +236,41 @@ app.post(webhookPath, async (req, res) => {
     // Load user memory (chat + facts) from Redis
     let memory = await getUserMemory(chatId);
 
-    // Extract facts from the user's message
+    // Extract facts from the user's message BEFORE adding to chat
     memory.facts = await extractFacts(memory.facts, text, firstName);
 
     // Append user's new message to chat history
     memory.chat.push({ role: "user", content: text });
 
-    // Truncate chat to last 20 messages to prevent token overflow
+    // Truncate chat to last 20 messages
     memory.chat = truncateChat(memory.chat, 20);
 
-    // Build system prompt with user facts
-    const factsContext = Object.keys(memory.facts).length > 0
-      ? `\n\nWhat you know about ${firstName}:\n${JSON.stringify(memory.facts, null, 2)}\n\nUse this information to answer their questions accurately and personally.`
-      : "";
+    // Build comprehensive system prompt with ALL known facts
+    let systemPrompt = `You are Cody, a friendly and intelligent AI assistant created by Jonathan Kalu.`;
+    
+    if (Object.keys(memory.facts).length > 0) {
+      systemPrompt += `\n\nIMPORTANT - What you know about ${firstName}:\n${JSON.stringify(memory.facts, null, 2)}`;
+      systemPrompt += `\n\nCRITICAL RULES:
+- Use this information to answer questions accurately
+- If asked about facts you know, answer confidently with the stored information
+- Reference their name, age, occupation, experience, and other facts naturally
+- Don't ask for information you already have
+- Be personal and remember context from previous conversations`;
+    } else {
+      systemPrompt += `\n\nThe user's name is ${firstName}. Be helpful, engaging, and remember what they tell you.`;
+    }
 
-    const systemPrompt = `You are Cody, a friendly AI assistant. The user's name is ${firstName}.${factsContext}
-
-Important:
-- Reference previous messages and known facts when relevant
-- If asked about information you know (from facts), answer confidently
-- Keep the tone helpful, engaging, and personal
-- Don't ask for information you already have in facts`;
-
-    // Get AI response from Groq with full conversation context
+    // Get AI response with full context
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         {
           role: "system",
           content: systemPrompt
         },
-        ...memory.chat // Feed full conversation history
+        ...memory.chat
       ],
       model: "llama-3.1-8b-instant",
-      temperature: 1,
+      temperature: 0.8,
       max_tokens: 8192,
       top_p: 1,
       stream: false,
@@ -265,10 +282,10 @@ Important:
     // Append AI's response to chat history
     memory.chat.push({ role: "assistant", content: reply });
 
-    // Save updated memory (chat + facts) back to Redis
+    // Save updated memory back to Redis
     await saveUserMemory(chatId, memory);
 
-    // Send reply back to Telegram
+    // Send reply to Telegram
     await axios.post(`${telegramApi}/sendMessage`, {
       chat_id: chatId,
       text: reply,
