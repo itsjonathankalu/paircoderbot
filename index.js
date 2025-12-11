@@ -27,6 +27,11 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Root keepalive route
+app.get("/", (req, res) => {
+  res.status(200).send("Cody is alive!");
+});
+
 app.post(webhookPath, async (req, res) => {
   const { message } = req.body;
   if (!message || !message.text) return res.sendStatus(200);
