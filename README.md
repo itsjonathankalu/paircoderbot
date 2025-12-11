@@ -12,6 +12,9 @@ A simple, but extensible Node.js implementation for a Telegram Bot that uses the
 
 - **Telegram Integration**: Connects to the Telegram Bot API using webhooks.
 - **AI-Powered Responses**: Uses the Groq API to generate responses with the `llama-3.1-8b-instant` model.
+- **Conversation Memory**: Remembers chat history using Redis/Upstash for persistent, context-aware conversations.
+- **Auto-Truncation**: Keeps last 20 messages to prevent token overflow while maintaining context.
+- **User Registration**: Automatically registers users in Redis with 1-year data retention.
 - **Easy to Set Up**: Get your bot running in a few simple steps.
 - **Extensible**: The code is simple and can be easily extended with more features.
 
@@ -26,6 +29,7 @@ Before you begin, you will need the following:
 - **Node.js**: Make sure you have Node.js installed on your system. You can download it from [nodejs.org](https://nodejs.org/).
 - **Telegram Bot Token**: You need to get a bot token from the [@BotFather](https://t.me/BotFather) on Telegram.
 - **Groq API Key**: You need an API key from [Groq](https://console.groq.com/keys).
+- **Upstash Redis**: Create a free Redis database at [Upstash](https://console.upstash.io/) for conversation memory.
 - **Public URL**: You need a publicly accessible URL for Telegram to send updates to. For local development, you can use a tool like [ngrok](https://ngrok.com/).
 
 ### Installation
@@ -56,8 +60,14 @@ Before you begin, you will need the following:
     ```
     TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
     GROQ_API_KEY=YOUR_GROQ_API_KEY
+    UPSTASH_REDIS_REST_URL=https://your-instance.upstash.io
+    UPSTASH_REDIS_REST_TOKEN=YOUR_UPSTASH_REST_TOKEN
     ```
-    Replace `YOUR_TELEGRAM_BOT_TOKEN` and `YOUR_GROQ_API_KEY` with the actual tokens you obtained.
+    Replace the placeholders with your actual tokens:
+    - `YOUR_TELEGRAM_BOT_TOKEN` - Get from [@BotFather](https://t.me/BotFather)
+    - `YOUR_GROQ_API_KEY` - Get from [Groq Console](https://console.groq.com/keys)
+    - Upstash credentials - Get from [Upstash Console](https://console.upstash.io/) → Your Database → REST API section
+
 
 ### Running Locally
 
@@ -175,7 +185,8 @@ If the bot doesn't respond, it's likely that the daily limit has been reached. I
 
 ## Project Structure
 
-- `index.js`: The main entry point of the application. It contains the Express server, the webhook handler, and the logic for interacting with the Telegram and Groq APIs.
+- `index.js`: The main entry point of the application. It contains the Express server, the webhook handler, Redis integration for conversation memory, and the logic for interacting with the Telegram and Groq APIs.
+- `prompter.js`: Handles automated check-in messages to registered users in batches.
 - `package.json`: Defines the project's metadata and lists the dependencies.
 - `.env`: Stores the API keys and other secret credentials. This file is not committed to version control.
 - `.env.example`: An example file for the environment variables.
@@ -187,4 +198,5 @@ This project uses the following main dependencies:
 - [express](https://expressjs.com/): A fast, unopinionated, minimalist web framework for Node.js.
 - [axios](https://axios-http.com/): A promise-based HTTP client for the browser and Node.js.
 - [groq-sdk](https://github.com/groq/groq-node): The official Node.js SDK for the Groq API.
+- [@upstash/redis](https://github.com/upstash/upstash-redis): Serverless Redis client for Upstash with REST API support.
 - [dotenv](https://github.com/motdotla/dotenv): A zero-dependency module that loads environment variables from a `.env` file into `process.env`.

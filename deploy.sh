@@ -14,6 +14,16 @@ if [ -z "$GROQ_API_KEY" ]; then
     exit 1
 fi
 
+if [ -z "$UPSTASH_REDIS_REST_URL" ]; then
+    echo "❌ Error: UPSTASH_REDIS_REST_URL environment variable is not set"
+    exit 1
+fi
+
+if [ -z "$UPSTASH_REDIS_REST_TOKEN" ]; then
+    echo "❌ Error: UPSTASH_REDIS_REST_TOKEN environment variable is not set"
+    exit 1
+fi
+
 echo "✅ Environment variables are set"
 
 # Build the Docker image
@@ -35,6 +45,8 @@ docker run -d \
     -p 3000:3000 \
     -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
     -e GROQ_API_KEY="$GROQ_API_KEY" \
+    -e UPSTASH_REDIS_REST_URL="$UPSTASH_REDIS_REST_URL" \
+    -e UPSTASH_REDIS_REST_TOKEN="$UPSTASH_REDIS_REST_TOKEN" \
     -e NODE_ENV=production \
     -e PORT=3000 \
     paircoderbot:latest
