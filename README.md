@@ -12,7 +12,9 @@ A simple, but extensible Node.js implementation for a Telegram Bot that uses the
 
 - **Telegram Integration**: Connects to the Telegram Bot API using webhooks.
 - **AI-Powered Responses**: Uses the Groq API to generate responses with the `llama-3.1-8b-instant` model.
-- **Conversation Memory**: Remembers chat history using Redis/Upstash for persistent, context-aware conversations.
+- **Structured Memory**: Stores both conversation history and extracted user facts separately.
+- **Automatic Fact Extraction**: AI automatically identifies and remembers facts about users (age, location, preferences, etc.).
+- **Context-Aware Conversations**: Uses stored facts to answer questions accurately and personally.
 - **Auto-Truncation**: Keeps last 20 messages to prevent token overflow while maintaining context.
 - **User Registration**: Automatically registers users in Redis with 1-year data retention.
 - **Easy to Set Up**: Get your bot running in a few simple steps.

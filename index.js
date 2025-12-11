@@ -35,31 +35,38 @@ console.log('✅ Upstash Redis client initialized');
 // ========== REDIS MEMORY HELPER FUNCTIONS ==========
 
 /**
- * Fetch user conversation memory from Redis
+ * Fetch user memory (chat + facts) from Redis
  * @param {string|number} chatId - Telegram chat ID
- * @returns {Array} - Array of message objects with role and content
+ * @returns {Object} - Object with chat history and user facts
  */
 async function getUserMemory(chatId) {
   try {
     const data = await redis.get(`user:${chatId}:memory`);
-    return data ? JSON.parse(data) : [];
+    if (data) {
+      return JSON.parse(data);
+    }
+    // Return default structure
+    return {
+      chat: [],
+      facts: {}
+    };
   } catch (error) {
     console.error(`Error fetching memory for ${chatId}:`, error);
-    return [];
+    return { chat: [], facts: {} };
   }
 }
 
 /**
- * Save user conversation memory to Redis with 1 year expiration
+ * Save user memory (chat + facts) to Redis with 1 year expiration
  * @param {string|number} chatId - Telegram chat ID
- * @param {Array} history - Array of message objects
+ * @param {Object} memory - Object containing chat and facts
  */
-async function saveUserMemory(chatId, history) {
+async function saveUserMemory(chatId, memory) {
   try {
     // Auto-expire in 1 year (365 days in seconds)
     await redis.set(
       `user:${chatId}:memory`,
-      JSON.stringify(history),
+      JSON.stringify(memory),
       { ex: 60 * 60 * 24 * 365 }
     );
   } catch (error) {
@@ -91,16 +98,93 @@ async function registerUser(chatId, firstName) {
 }
 
 /**
- * Truncate memory to last N messages to prevent token overflow
- * @param {Array} memory - Full conversation history
+ * Truncate chat history to last N messages to prevent token overflow
+ * @param {Array} chat - Full conversation history
  * @param {number} maxMessages - Maximum number of messages to keep (default: 20)
- * @returns {Array} - Truncated memory
+ * @returns {Array} - Truncated chat
  */
-function truncateMemory(memory, maxMessages = 20) {
-  if (memory.length > maxMessages) {
-    return memory.slice(-maxMessages);
+function truncateChat(chat, maxMessages = 20) {
+  if (chat.length > maxMessages) {
+    return chat.slice(-maxMessages);
   }
-  return memory;
+  return chat;
+}
+
+/**
+ * Extract user facts from the conversation using AI
+ * @param {Object} currentFacts - Current user facts
+ * @param {string} userMessage - New message from user
+ * @param {string} firstName - User's first name
+ * @returns {Object} - Updated facts object
+ */
+async function extractFacts(currentFacts, userMessage, firstName) {
+  try {
+    const factExtractionPrompt = `You are a fact extraction assistant. Extract ONLY new factual information about the user from their message.
+
+Current known facts about the user:
+${JSON.stringify(currentFacts, null, 2)}
+
+User's new message: "${userMessage}"
+
+Instructions:
+1. Extract ONLY clear, factual information (age, name, location, occupation, hobbies, preferences, etc.)
+2. Do NOT extract opinions, questions, or temporary states
+3. Update existing facts if new information contradicts them
+4. Return ONLY a JSON object with key-value pairs
+5. If no new facts, return an empty object {}
+6. Use simple keys like: age, name, city, country, occupation, hobby, favorite_color, etc.
+
+Examples:
+- "I am 17" → {"age": 17}
+- "I live in Enugu" → {"city": "Enugu"}
+- "My name is Jonathan" → {"name": "Jonathan"}
+- "I love coding" → {"hobby": "coding"}
+- "How are you?" → {}
+
+Return ONLY valid JSON, nothing else:`;
+
+    const factExtraction = await groq.chat.completions.create({
+      messages: [
+        { 
+          role: "system", 
+          content: "You extract structured factual information about users from their messages. Return only valid JSON." 
+        },
+        { 
+          role: "user", 
+          content: factExtractionPrompt 
+        }
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.1, // Low temperature for consistent extraction
+      max_tokens: 500
+    });
+
+    const responseText = factExtraction.choices[0].message.content.trim();
+    
+    // Try to parse JSON, handling potential markdown code blocks
+    let extractedFacts = {};
+    try {
+      // Remove markdown code blocks if present
+      const cleanedResponse = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      extractedFacts = JSON.parse(cleanedResponse);
+    } catch (parseError) {
+      console.log("Could not parse facts, using empty object:", responseText);
+      extractedFacts = {};
+    }
+
+    // Merge with current facts
+    const updatedFacts = { ...currentFacts, ...extractedFacts };
+    
+    // Log if new facts were extracted
+    if (Object.keys(extractedFacts).length > 0) {
+      console.log(`📝 Extracted new facts for user:`, extractedFacts);
+    }
+
+    return updatedFacts;
+  } catch (error) {
+    console.error("Error extracting facts:", error);
+    return currentFacts; // Return unchanged facts on error
+  }
 }
 
 // ========== ENDPOINTS ==========
@@ -134,23 +218,39 @@ app.post(webhookPath, async (req, res) => {
       action: "typing",
     });
 
-    // Load conversation memory from Redis
+    // Load user memory (chat + facts) from Redis
     let memory = await getUserMemory(chatId);
 
-    // Append user's new message to memory
-    memory.push({ role: "user", content: text });
+    // Extract facts from the user's message
+    memory.facts = await extractFacts(memory.facts, text, firstName);
 
-    // Truncate memory to last 20 messages to prevent token overflow
-    memory = truncateMemory(memory, 20);
+    // Append user's new message to chat history
+    memory.chat.push({ role: "user", content: text });
+
+    // Truncate chat to last 20 messages to prevent token overflow
+    memory.chat = truncateChat(memory.chat, 20);
+
+    // Build system prompt with user facts
+    const factsContext = Object.keys(memory.facts).length > 0
+      ? `\n\nWhat you know about ${firstName}:\n${JSON.stringify(memory.facts, null, 2)}\n\nUse this information to answer their questions accurately and personally.`
+      : "";
+
+    const systemPrompt = `You are Cody, a friendly AI assistant. The user's name is ${firstName}.${factsContext}
+
+Important:
+- Reference previous messages and known facts when relevant
+- If asked about information you know (from facts), answer confidently
+- Keep the tone helpful, engaging, and personal
+- Don't ask for information you already have in facts`;
 
     // Get AI response from Groq with full conversation context
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         {
           role: "system",
-          content: `You are Cody, a friendly AI assistant. The user's name is ${firstName}. Reference previous messages if relevant. Keep the tone helpful and engaging.`
+          content: systemPrompt
         },
-        ...memory // Feed full conversation history
+        ...memory.chat // Feed full conversation history
       ],
       model: "llama-3.1-8b-instant",
       temperature: 1,
@@ -162,10 +262,10 @@ app.post(webhookPath, async (req, res) => {
 
     const reply = chatCompletion.choices[0].message.content;
 
-    // Append AI's response to memory
-    memory.push({ role: "assistant", content: reply });
+    // Append AI's response to chat history
+    memory.chat.push({ role: "assistant", content: reply });
 
-    // Save updated memory back to Redis
+    // Save updated memory (chat + facts) back to Redis
     await saveUserMemory(chatId, memory);
 
     // Send reply back to Telegram
